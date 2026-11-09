@@ -164,8 +164,6 @@ class Handler(BaseHTTPRequestHandler):
             if uid:
                 db.set_default_uid(uid)
             result = commands.dispatch(command)
-            elapsed = int((time.time() - started) * 1000)
-            db.log_command(db.get_default_uid(), command, result.ok, elapsed)
 
             segments: list[dict[str, Any]] = []
             # 命令自己产出的图片段（如扫码登录的二维码）优先
@@ -174,7 +172,7 @@ class Handler(BaseHTTPRequestHandler):
                 segments.extend(preset)
 
             render_error = ''
-            if want_image and result.ok and result.blocks and not preset:
+            if want_image and result.ok and not preset and (result.blocks or result.custom_renderer):
                 try:
                     png = result.render_png()
                     if png:
@@ -186,6 +184,9 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception as e:  # 出图失败不影响文字结果
                     render_error = f'{type(e).__name__}: {e}'
                     traceback.print_exc()
+
+            elapsed = int((time.time() - started) * 1000)
+            db.log_command(db.get_default_uid(), command, result.ok, elapsed)
 
             summary = result.text
             if render_error:
