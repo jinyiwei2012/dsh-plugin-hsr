@@ -1,0 +1,5 @@
+{
+  "expose_to_model": true,
+  "command_prefix": "sr",
+  "cache_ttl": 600
+}

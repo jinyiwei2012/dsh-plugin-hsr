@@ -1,0 +1,43 @@
+{
+  "name": "dsh-plugin-hsr",
+  "version": "0.1.0",
+  "description": "星穹铁道账号查询与遗器评分：DSH 插件",
+  "license": "MIT",
+  "type": "module",
+  "main": "lib/index.js",
+  "files": [
+    "lib",
+    "locale",
+    "cordis.patch.yml",
+    "service/hsr",
+    "service/tools",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "honkai-star-rail",
+    "starrail",
+    "artifact"
+  ],
+  "scripts": {
+    "test": "python tests/test_artifact.py",
+    "serve": "python service/hsr/server.py",
+    "bind": "python service/tools/bind_cookie.py",
+    "query": "python service/tools/query.py"
+  },
+  "engines": {
+    "node": "^22.19.0 || >=24.2.0"
+  }
+}

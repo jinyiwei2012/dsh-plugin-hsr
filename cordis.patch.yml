@@ -1,0 +1,8 @@
+- insert:
+    - id: hsr-plugin
+      name: 'dsh-plugin-hsr'
+      config:
+        port: 9778
+        autoStart: true
+        # 设为 false 则模型看不到本插件，只能用 /sr 命令（省上下文）
+        exposeToModel: true

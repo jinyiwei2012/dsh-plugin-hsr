@@ -1,0 +1,174 @@
+# -*- coding: utf-8 -*-
+"""本地 HTTP 服务：向 DSH 插件暴露查询接口。
+
+只监听 127.0.0.1，不对外网开放。依赖仅标准库。
+
+接口
+----
+GET  /api/health          健康检查
+POST /api/chat            执行命令，返回 {ok, title, summary, lines, segments}
+GET  /api/accounts        已绑定账号
+POST /api/refresh         清缓存后重新拉取
+
+启动::
+
+    python service/hsr/server.py --port 9778
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+import time
+import traceback
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any
+
+_SERVICE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _SERVICE not in sys.path:
+    sys.path.insert(0, _SERVICE)
+
+from hsr import commands  # noqa: E402
+from hsr.store import db  # noqa: E402
+
+VERSION = '0.1.0'
+
+
+def _json_default(o: Any) -> Any:
+    if isinstance(o, set):
+        return list(o)
+    return str(o)
+
+
+class Handler(BaseHTTPRequestHandler):
+    """极简 JSON API。"""
+
+    server_version = f'dsh-plugin-hsr/{VERSION}'
+    # 抑制逐请求日志噪音
+    quiet = True
+
+    def log_message(self, fmt: str, *args: Any) -> None:  # noqa: A003
+        if not self.quiet:
+            sys.stderr.write('%s - %s\n' % (self.address_string(), fmt % args))
+
+    # ------------------------------------------------------------ 工具
+
+    def _send(self, code: int, payload: dict[str, Any]) -> None:
+        body = json.dumps(payload, ensure_ascii=False, default=_json_default).encode('utf-8')
+        self.send_response(code)
+        self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _read_json(self) -> dict[str, Any]:
+        try:
+            length = int(self.headers.get('Content-Length') or 0)
+        except ValueError:
+            length = 0
+        if length <= 0:
+            return {}
+        raw = self.rfile.read(length)
+        try:
+            return json.loads(raw.decode('utf-8'))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return {}
+
+    # ------------------------------------------------------------ 路由
+
+    def do_GET(self) -> None:  # noqa: N802
+        path = self.path.split('?')[0]
+        if path == '/api/health':
+            self._send(200, {
+                'ok': True, 'service': 'dsh-plugin-hsr', 'version': VERSION,
+                'default_uid': db.get_default_uid(),
+            })
+        elif path == '/api/accounts':
+            self._send(200, {
+                'ok': True,
+                'accounts': [
+                    {'uid': a.uid, 'nickname': a.nickname, 'level': a.level,
+                     'server': a.server, 'has_cookie': bool(a.cookie)}
+                    for a in db.list_accounts()
+                ],
+            })
+        else:
+            self._send(404, {'ok': False, 'summary': f'未知路径 {path}'})
+
+    def do_POST(self) -> None:  # noqa: N802
+        path = self.path.split('?')[0]
+        body = self._read_json()
+
+        if path == '/api/chat':
+            self._chat(body)
+        elif path == '/api/refresh':
+            db.save_profile(body.get('uid') or db.get_default_uid(), {})
+            self._send(200, {'ok': True, 'summary': '缓存已清空，下次查询会重新拉取'})
+        else:
+            self._send(404, {'ok': False, 'summary': f'未知路径 {path}'})
+
+    # ------------------------------------------------------------ 业务
+
+    def _chat(self, body: dict[str, Any]) -> None:
+        command = str(body.get('command') or '').strip()
+        uid = body.get('uid')
+        uid = str(uid) if uid else None
+
+        started = time.time()
+        try:
+            if uid:
+                db.set_default_uid(uid)
+            result = commands.dispatch(command)
+            elapsed = int((time.time() - started) * 1000)
+            db.log_command(db.get_default_uid(), command, result.ok, elapsed)
+
+            summary = result.text
+            self._send(200, {
+                'ok': result.ok,
+                'title': result.title,
+                'summary': summary,
+                'lines': result.lines,
+                'segments': [],
+                'elapsed': elapsed,
+            })
+        except Exception as e:  # noqa: BLE001
+            elapsed = int((time.time() - started) * 1000)
+            detail = f'{type(e).__name__}: {e}'
+            traceback.print_exc()
+            self._send(200, {
+                'ok': False,
+                'title': '执行失败',
+                'summary': f'❌ {detail}',
+                'lines': [],
+                'segments': [],
+                'elapsed': elapsed,
+            })
+
+
+def serve(port: int = 9778, host: str = '127.0.0.1') -> None:
+    httpd = ThreadingHTTPServer((host, port), Handler)
+    print(f'[hsr] 服务已启动 http://{host}:{port}  (version {VERSION})', flush=True)
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        print('[hsr] 收到中断，正在退出', flush=True)
+    finally:
+        httpd.server_close()
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description='dsh-plugin-hsr 本地服务')
+    ap.add_argument('--port', type=int, default=int(os.environ.get('HSR_PORT', 9778)))
+    ap.add_argument('--host', default=os.environ.get('HSR_HOST', '127.0.0.1'))
+    ap.add_argument('--verbose', action='store_true', help='打印每个请求')
+    args = ap.parse_args(argv)
+
+    Handler.quiet = not args.verbose
+    serve(args.port, args.host)
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

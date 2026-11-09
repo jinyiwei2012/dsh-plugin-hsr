@@ -13,8 +13,13 @@ venv/
 .pytest_cache/
 
 # --- 运行时数据（账号隐私，绝不入库）---
-service/data/
-!service/data/.gitkeep
+# 只忽略数据库与临时产物；service/data/config.json 是默认配置，需要入库
+service/data/*.db
+service/data/*.db-journal
+service/data/*.sqlite
+service/data/*.sqlite3
+service/data/cache/
+service/data/media/
 *.db
 *.db-journal
 *.sqlite
