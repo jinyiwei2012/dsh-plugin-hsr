@@ -66,6 +66,20 @@ class MysError(RuntimeError):
         self.retcode = retcode
 
 
+# 10041 的实测定位结论（见 AI_DECISIONS.md）：
+#   同一份 Cookie 下，本账号的 role_id → 10041；
+#   不存在的 role_id → 1008；别人的 role_id → 10102；无 Cookie → 10001。
+#   说明 10041 不是鉴权失败，而是「该角色的战绩没公开」。
+RETCODE_10041_HINT = (
+    '该角色的战绩数据未公开（retcode 10041）。\n'
+    '这不是插件的问题，也不是 Cookie 失效——米游社侧把这个号的详情隐藏了。\n'
+    '打开方式：米游社 App → 我的 → 我的角色 → 点进崩铁角色卡片 → 隐私设置\n'
+    '        → 打开「公开我的角色详情」与「显示我的战绩」。\n'
+    '改完后重新查询即可，无需重新绑定。\n'
+    '在此期间仍可用免登录的展柜数据（仅展柜内角色）。'
+)
+
+
 @dataclass
 class ParsedCookie:
     """从浏览器 Cookie 里解析出的登录凭据。"""
@@ -131,8 +145,14 @@ def _throttle() -> None:
         _last_call = time.time()
 
 
-def _request(path: str, params: dict[str, str], cookie: ParsedCookie) -> dict[str, Any]:
-    """发一次签名请求并返回 data 段。"""
+def _request(path: str, params: dict[str, str], cookie: ParsedCookie,
+             client_type: str | None = None,
+             app_version: str | None = None) -> dict[str, Any]:
+    """发一次签名请求并返回 data 段。
+
+    ``client_type`` / ``app_version`` 可覆盖，用于探测哪组请求头被接受
+    （实测不同组合会返回不同的 retcode）。
+    """
     query = urllib.parse.urlencode(sorted(params.items()))
     url = f'{HOST}{path}?{query}'
     ds = make_ds(query)
@@ -142,12 +162,15 @@ def _request(path: str, params: dict[str, str], cookie: ParsedCookie) -> dict[st
         'Accept': 'application/json, text/plain, */*',
         'Cookie': cookie.raw,
         'DS': ds,
-        'x-rpc-app_version': APP_VERSION,
-        'x-rpc-client_type': '5',
+        'x-rpc-app_version': app_version if app_version is not None else APP_VERSION,
+        'x-rpc-client_type': client_type if client_type is not None else '5',
         'x-rpc-language': 'zh-cn',
         'Referer': 'https://app.mihoyo.com/',
         'Origin': 'https://app.mihoyo.com',
     }
+    # 传空字符串表示不带这个头
+    for key in [k for k, v in headers.items() if v == '']:
+        headers.pop(key)
 
     last_err: Exception | None = None
     for attempt in range(MAX_RETRY + 1):
@@ -177,6 +200,9 @@ def _request(path: str, params: dict[str, str], cookie: ParsedCookie) -> dict[st
             return payload['data']
 
         message = payload.get('message') or '未知错误'
+        # 10041：鉴权已过，但该角色的战绩数据未公开（米游社侧隐私设置）
+        if retcode == 10041:
+            raise MysError(RETCODE_10041_HINT, retcode)
         # 登录态失效：直接抛，不重试
         if retcode in (10001, -100, 10103, 1009):
             raise MysError(
@@ -190,6 +216,36 @@ def _request(path: str, params: dict[str, str], cookie: ParsedCookie) -> dict[st
         time.sleep(2 ** attempt)
 
     raise last_err or MysError('请求失败')
+
+
+# 请求头候选：官方前端不同时期用不同组合，逐个试到能通为止
+HEADER_VARIANTS: list[tuple[str, str, str]] = [
+    # (说明, client_type, app_version)，空串表示不带该头
+    ('web/2.11.1', '5', '2.11.1'),
+    ('web/无版本', '5', ''),
+    ('web/2.90.1', '5', '2.90.1'),
+    ('app/2.90.1', '3', '2.90.1'),
+    ('app/无版本', '3', ''),
+    ('pc/1', '1', '1.0.0'),
+    ('仅 Cookie+DS', '', ''),
+]
+
+
+def probe_headers(uid: str, server: str, cookie: ParsedCookie) -> tuple[str, str, dict]:
+    """逐个试请求头组合，返回第一个能成功的。
+
+    返回 ``(client_type, app_version, data)``。
+    """
+    errors: list[str] = []
+    for label, ctype, ver in HEADER_VARIANTS:
+        try:
+            data = _request(PATH_INDEX, {'role_id': str(uid), 'server': server},
+                            cookie, client_type=ctype, app_version=ver)
+            return ctype, ver, data
+        except MysError as e:
+            errors.append(f'{label}: {e}')
+            continue
+    raise MysError('所有请求头组合都失败：\n  ' + '\n  '.join(errors))
 
 
 def fetch_index(uid: str, server: str, cookie: ParsedCookie) -> dict[str, Any]:

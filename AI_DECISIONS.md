@@ -132,3 +132,86 @@ HTML 出来的卡片在字体、间距、阴影、等宽数字上都明显更好
 
 **风险与回滚**：上游改表时重跑 `harvest_miao.py` 即可；
 算法层面若与上游产生分歧，以本仓库注释与测试为准。
+
+---
+
+## 2026-11-09 战绩接口 10041：是「签名问题」还是「账号状态」
+
+**待定问题**：米游社战绩接口（`api-takumi-record.mihoyo.com`）对本账号的崩铁角色
+一直返回 `retcode=10041`（`message` 为空）。此前把原因挂在了签名上，
+但这会走错方向，需要先定位清楚再改代码。
+
+**背景约束**：扫码登录已能拿到 stoken，也能换出 ltoken，但换成可用 Cookie 后
+`index` / `avatar/info` / `challenge` 三个接口全部是 10041。
+
+**排查过程与证据**（均为本机实测，同一份网页 Cookie）：
+
+1. **账号与角色是匹配的**。`getUserGameRolesByCookie?game_biz=hkrpg_cn`
+   返回 `retcode=0`，列表里有 `114172341 / prod_gf_cn / 洛天依 / Lv70`。
+   → 「Cookie 和 UID 不是同一个号」这个假设被推翻。
+2. **签名是被接受的**。同一份 Cookie、同一套签名打**原神** `index`，
+   返回业务层的 `5003`，而不是 `-10001 invalid request`。
+   → salt 与 `x-rpc-app_version` 组合正确，DS 算法没问题。
+3. **不是 header 组合问题**。穷举 10 个 `app_version`（2.11.1 → 3.0.0），
+   崩铁全部 10041、原神全部 5003；再叠加 `x-rpc-device_id` / `device_fp` /
+   `device_name` / `sys_version` / `channel` / App UA / `X-Requested-With`
+   一共 7 组附加头，崩铁依然全是 10041。
+4. **不是签名算法版本问题**。DS1（`r` 取 6 位字母数字）与
+   DS2（`r` 取 100000..200000 整数，[UIGF 文档](https://uigf.org/zh/mihoyo-api-collection/other/authentication.html)
+   给的标准写法）两种写法都是 10041。
+5. **cookie 字段组合矩阵**：
+   `ltmid_v2 + ltoken_v2` → **10041**；
+   其余所有组合（无 cookie、只 ltoken_v2、ltuid_v2+ltoken_v2、
+   cookie_token_v2、ltuid_v2+cookie_token_v2、三者齐全）→ `10001 Please login`。
+   → 说明 `ltmid_v2 + ltoken_v2` 是**被接受的凭据组合**，鉴权确实过了，
+   10041 是在鉴权之后的业务层返回。
+6. **最关键的定位实验**——同一份 Cookie 下换 `role_id`：
+
+   | `role_id` | 返回 | 含义 |
+   |---|---|---|
+   | `114172341`（本账号） | `10041` | 命中了某项账号级限制 |
+   | `999999999`（不存在） | `1008 用户信息不匹配` | 不是鉴权墙，是先做 UID 校验 |
+   | `100000001`（别人的号） | `10102 Data is not public for the user` | 同上，进入了业务层 |
+   | 任意 UID（无 Cookie） | `10001 Please login` | 未登录 |
+
+   如果 10041 是「这道墙你过不去」，那**所有** UID 都该是 10041 或 10001。
+   实际是「只有本账号的号报 10041，别人的号能走进业务层」——
+   所以 10041 是**本账号在米游社侧的状态**，不是接口拒绝我们的请求。
+7. **`server` 参数校验正常**：`prod_gf_cn` → 10041；
+   `prod_official_asia` / `cn_gf01` / `bogus` → `-1 param error`。
+   说明参数被正常解析，没有卡在参数层。
+
+**结论**：`10041` 等价于「该角色的战绩数据未公开 / 被隐藏」。
+玩家可以在**米游社 App → 我的 → 游戏角色 → 角色卡片 → 隐私设置**里
+把「公开我的角色详情」打开。关掉打码后，同一套代码不需要任何修改就能读到数据——
+这一点是本轮**未能验证**的（改动需要账号持有人操作），
+必须标注为待验证，不能当作已经修好。
+
+**采纳的策略**（代码层面）：
+
+1. **mihomo 公开接口作为免登录主路径**（`api.mihomo.me/sr_info_parsed/<uid>`）。
+   它只给展柜里的角色，但**不需要任何凭据**，也不受打码影响，现在就能用。
+2. **扫码登录作为完整路径**（`getUserGameRolesByCookie` 走 stoken → 派生 Cookie），
+   在打码打开后自动生效，用来拿全部角色与战绩。
+3. **网页 Cookie 不再作为战绩来源**，只用于「查账号绑定了哪些角色」这类
+   不需要角色详情的只读操作。
+4. 报错信息要把 `10041` 翻译成可操作的中文提示（去米游社关打码），
+   而不是把 retcode 丢给用户。
+
+**验证方式**：`scripts/probe_10041.py` 可离线复现第 5、7 两项矩阵；
+Cookie 说明见 `docs/cookie.md`。打码关闭后的真实读数待用户操作后补验。
+
+**顺手修掉的一个真 bug**：`qr_watch.py` 之前只要 `probe_headers` 抛异常就
+`return 1`，凭据停留在 `settings.pending_cookie` 而不入库。
+但 10041 属于「凭据有效、只是数据没公开」，这种情况也应该入库——
+否则用户去打开隐私设置之后还得**重新扫一次码**。
+现在遇到 10041 会正常 `save_account`，只是昵称/等级暂时为空，改完设置直接查即可。
+
+**风险与回滚**：mihomo 只需要 UID，无凭据风险；扫码登录产生的 Cookie 只落在
+`service/data/hsr.db`（已 gitignore），不进仓库、不进日志。
+回滚只需停用 Mys 数据源，mihomo 路径不受影响。
+
+**附带清理**：本轮排查用的 5 个探针脚本把真凭据硬编码在源码里
+（`probe_v2.py` / `probe_roles.py` / `probe_ds2.py` / `probe_headers2.py` /
+`probe_versions.py`），虽然未推送，但仓库是公开的，已全部删除。
+后续探针一律从 `db.get_setting()` 读凭据，不写死在文件里。
