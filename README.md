@@ -24,6 +24,8 @@ sr 昔涟遗器     遗器逐件评分 + 提升建议
 查询结果会同时渲染一张卡片显示在界面上（深色主题 + 评分配色）。
 不想要图就传 `with_image: false`。
 
+![遗器评分示例](docs/screenshot-panel.png)
+
 出图用 **Pillow**（本机渲染，无浏览器）：
 
 - 有 Pillow 与中文字体 → 出 PNG

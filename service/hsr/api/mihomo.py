@@ -129,27 +129,53 @@ def _parse_character(raw: dict) -> Character:
     path = (raw.get('path') or {}).get('name') or ''
 
     # 角色自身基础属性
-    base_attr: dict[str, float] = {}
+    base: dict[str, float] = {}
     for a in raw.get('attributes') or []:
         name = a.get('name') or ''
         val = a.get('value')
         if val is None:
             continue
         if name == '基础生命值':
-            base_attr['hp'] = float(val)
+            base['hp'] = float(val)
         elif name == '基础攻击力':
-            base_attr['atk'] = float(val)
+            base['atk'] = float(val)
         elif name == '基础防御力':
-            base_attr['def'] = float(val)
+            base['def'] = float(val)
+        elif name == '速度':
+            base['speed'] = float(val)
+        elif name == '暴击率':
+            base['crit_rate'] = float(val)
+        elif name == '暴击伤害':
+            base['crit_dmg'] = float(val)
 
-    # 面板汇总（含养成加成）
-    panel: dict[str, float] = {}
+    # 养成加成（含光锥与遗器）
+    add: dict[str, float] = {}
     for a in raw.get('additions') or []:
         name = a.get('name') or ''
         val = a.get('value')
-        if val is None:
-            continue
-        panel[name] = float(val)
+        if val is not None:
+            add[name] = float(val)
+
+    # 面板 = 基础 + 加成（此前只取了加成，导致面板偏低）
+    panel: dict[str, float] = {}
+    for key, base_key, add_key in (
+        ('生命值', 'hp', '基础生命值'),
+        ('攻击力', 'atk', '基础攻击力'),
+        ('防御力', 'def', '基础防御力'),
+        ('速度', 'speed', '速度'),
+        ('暴击率', 'crit_rate', '暴击率'),
+        ('暴击伤害', 'crit_dmg', '暴击伤害'),
+    ):
+        if base_key in base or add_key in add:
+            panel[key] = base.get(base_key, 0.0) + add.get(add_key, 0.0)
+    # 这几项没有基础值，只有加成
+    for key in ('击破特攻', '效果命中', '效果抵抗', '能量恢复效率', '治疗量加成'):
+        if key in add:
+            panel[key] = add[key]
+    # 属性伤害加成（名字随属性变化，原样保留）
+    for key, val in add.items():
+        if key.endswith('属性伤害提高') or key.endswith('属性伤害加成'):
+            panel[key] = val
 
     # 遗器：接口按类型给出，位置取 type（1~6）
     artifacts: list[Artifact] = []
@@ -195,7 +221,7 @@ def _parse_character(raw: dict) -> Character:
         level=int(raw.get('level') or 0),
         path=path,
         element=element,
-        base_attr=base_attr,
+        base_attr=base,
         light_cone=lc,
         artifacts=artifacts,
         set_counts=set_counts,
