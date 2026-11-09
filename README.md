@@ -11,13 +11,15 @@
 ## 能做什么
 
 ```
+sr 登录         米游社扫码登录（出二维码）
+sr 登录状态     检查扫码结果
 sr 查询         账号概览（等级、角色数、遗器评分总览）
 sr 练度         全角色遗器评分排行
 sr 昔涟面板     单角色面板
 sr 昔涟遗器     遗器逐件评分 + 提升建议
-sr 混沌         混沌回忆战绩（需要 Cookie）
-sr 虚构         虚构叙事战绩（需要 Cookie）
-sr 末日         末日幻影战绩（需要 Cookie）
+sr 混沌         混沌回忆战绩（需要登录）
+sr 虚构         虚构叙事战绩（需要登录）
+sr 末日         末日幻影战绩（需要登录）
 ```
 
 在对话里直接说人话也行：「查一下我星铁的练度」「昔涟的遗器怎么样」。
@@ -58,18 +60,39 @@ sr 末日         末日幻影战绩（需要 Cookie）
 
 ## 数据来源
 
-分两条路，按有没有绑定 Cookie 自动选择：
+分两条路，按有没有登录自动选择：
 
-| | mihomo 公开接口 | 米游社 Cookie |
+| | mihomo 公开接口 | 米游社登录 |
 |---|---|---|
 | 需要登录 | 否 | 是 |
 | 可见角色 | **仅游戏展柜** | **账号全部** |
 | 战绩 | 无 | 有 |
 | 风险 | 无 | 非官方接口，有风控 |
 
-**没有 Cookie 也能直接用**，只是只能看到展柜里那几个角色。
+**没有登录也能直接用**，只是只能看到展柜里那几个角色。
 
-绑定 Cookie：见 [docs/cookie.md](docs/cookie.md)
+### 扫码登录（推荐）
+
+在对话里直接说「登录」，会出一张二维码，用**米游社 App** 扫一下确认即可：
+
+```
+你：登录
+  → 出二维码
+你：登录状态
+  → 登录成功，UID 114172341  洛天依 Lv70
+```
+
+全程不用手动复制 Cookie。
+
+命令行也能用：
+
+```bash
+python service/tools/qr_login.py
+```
+
+### 手动粘贴 Cookie
+
+不想扫码的话见 [docs/cookie.md](docs/cookie.md)：
 
 ```bash
 python service/tools/bind_cookie.py          # 交互式绑定
@@ -106,16 +129,20 @@ dsh plugin --profile <profile> add file:<clone 目录>
 - **Python 3.9+** 在 PATH 里（`python --version` 能跑）
 - **Node.js 22+**（DSH 本身的要求）
 
-服务端只用 Python 标准库，**不需要 pip 装任何东西**。
-
-出图是可选增强：装了 **Pillow** 就出卡片，没装只出文字。
+核心功能只用 Python 标准库。出图与扫码登录需要两个小依赖：
 
 ```bash
-pip install Pillow   # 可选，想要图卡再装
+python -m pip install -r service/requirements.txt
+# 等价于：pip install Pillow qrcode
 ```
 
-中文字体需要系统自带（Windows 的微软雅黑、macOS 的 PingFang、
-Linux 的 Noto Sans CJK 都会自动识别）。
+| 装了什么 | 效果 | 不装会怎样 |
+|---|---|---|
+| Pillow | 查询结果渲染成卡片 | 退回纯文字 |
+| qrcode | 扫码登录出二维码 | 只能手动粘贴 Cookie |
+
+中文字体需要系统自带（Windows 微软雅黑、macOS PingFang、
+Linux Noto Sans CJK 都会自动识别）。
 
 ---
 

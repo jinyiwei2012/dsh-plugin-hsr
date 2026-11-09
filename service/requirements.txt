@@ -1,0 +1,13 @@
+# 运行依赖（只用于出图与扫码登录，其余功能纯标准库）
+#
+# 安装：
+#   python -m pip install -r service/requirements.txt
+#
+# 说明：
+#   Pillow  —— 渲染查询结果卡片、二维码 PNG
+#   qrcode  —— 生成米游社扫码登录二维码（纯 Python）
+#
+# 两者都不装也能用，只是没有图和二维码，会退回纯文字。
+
+Pillow>=10.0
+qrcode>=7.4

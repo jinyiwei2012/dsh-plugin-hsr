@@ -30,10 +30,13 @@ HELP_TEXT = """星穹铁道查询 · 命令
   <角色>面板         单角色面板（等级/星魂/光锥/关键属性）
   <角色>遗器         单角色遗器逐件评分与提升建议
   混沌 / 虚构 / 末日  战绩（需要 Cookie）
+  登录               米游社扫码登录（推荐，不用手动复制 Cookie）
+  登录状态           检查扫码结果
   帮助               显示本说明
 
 绑定 Cookie 才能查到全部角色与战绩（否则只有游戏展柜里展示的那几个）：
-  python service/tools/bind_cookie.py
+  扫码登录：直接发「登录」
+  手动绑定：python service/tools/bind_cookie.py
 """
 
 # 面板里值得展示的属性
@@ -522,6 +525,139 @@ def cmd_challenge(uid: str | None, kind: str = '1') -> CommandResult:
     )
 
 
+# ------------------------------------------------------------------ 扫码登录
+
+LOGIN_TICKET_KEY = 'login_ticket'
+
+
+def cmd_login() -> CommandResult:
+    """生成扫码登录二维码。"""
+    from .api import qrlogin
+
+    try:
+        qr = qrlogin.create_qr()
+    except qrlogin.QRLoginError as e:
+        return CommandResult(False, '创建二维码失败', [str(e)])
+    except Exception as e:  # noqa: BLE001
+        return CommandResult(False, '创建二维码失败', [f'{type(e).__name__}: {e}'])
+
+    db.set_setting(LOGIN_TICKET_KEY, qr.ticket)
+
+    lines = [
+        '用米游社 App 扫描下面的二维码，然后在手机上确认。',
+        '',
+        f'ticket: {qr.ticket}',
+    ]
+
+    segments: list[dict[str, Any]] = []
+    if qrlogin.qr_available():
+        import os as _os
+
+        out_dir = _os.path.join(db.DATA_DIR, 'media')
+        _os.makedirs(out_dir, exist_ok=True)
+        png = qrlogin.render_qr_png(
+            qr.url, _os.path.join(out_dir, f'qr-{qr.ticket[:8]}.png'))
+        if png:
+            segments.append({
+                'type': 'image',
+                'url': f'/api/media/{_os.path.basename(png)}',
+                'alt': '米游社扫码登录',
+            })
+            lines.append('二维码已生成，见上图。')
+        else:
+            lines.append('二维码渲染失败，请直接打开链接扫码。')
+    else:
+        lines.append('未安装 qrcode 库，无法出图。装一下即可：')
+        lines.append('  python -m pip install qrcode Pillow')
+
+    lines += [
+        '',
+        '链接（也可在手机上打开）：',
+        qr.url,
+        '',
+        '扫完并确认后，发「登录状态」让我检查结果。',
+    ]
+
+    return CommandResult(
+        ok=True, title='星穹铁道 · 扫码登录', lines=lines,
+        data={'qr_url': qr.url, 'ticket': qr.ticket, 'segments': segments},
+        card_title='扫码登录',
+        card_subtitle='用米游社 App 扫描二维码',
+    )
+
+
+def cmd_login_check() -> CommandResult:
+    """检查扫码登录状态。"""
+    from .api import mys, qrlogin
+
+    ticket = db.get_setting(LOGIN_TICKET_KEY)
+    if not ticket:
+        return CommandResult(False, '没有待确认的登录', ['先发「登录」生成二维码。'])
+
+    try:
+        st = qrlogin.query_status(ticket)
+    except qrlogin.QRLoginError as e:
+        return CommandResult(False, '查询失败', [str(e)])
+
+    if st.status.lower() == 'created':
+        return CommandResult(
+            True, '还没扫码',
+            ['请用米游社 App 扫描二维码并确认，然后再发一次「登录状态」。'],
+        )
+    if st.status.lower() == 'scanned':
+        return CommandResult(True, '已扫码，等待手机确认',
+                             ['请在手机上点「确认登录」。'])
+    if st.expired:
+        db.set_setting(LOGIN_TICKET_KEY, '')
+        return CommandResult(False, f'二维码已失效（{st.status}）',
+                             ['重新发「登录」生成新的二维码。'])
+    if not st.confirmed:
+        return CommandResult(True, f'状态：{st.status}', ['继续等待。'])
+
+    # 已确认：构造 Cookie 并校验
+    try:
+        cookie = qrlogin.build_cookie(st)
+    except qrlogin.QRLoginError as e:
+        return CommandResult(False, '获取 Cookie 失败', [str(e)])
+
+    uid = db.get_default_uid()
+    if not uid:
+        return CommandResult(
+            True, '已拿到 Cookie，但还没登记游戏 UID',
+            [
+                '先运行一次（把 UID 换成你的）：',
+                '  python service/tools/bind_cookie.py --uid-only 114172341',
+                '然后再发一次「登录状态」。',
+            ],
+        )
+
+    parsed = mys.parse_cookie(cookie)
+    account = db.get_account(uid)
+    server = account.server if account else 'prod_gf_cn'
+
+    try:
+        data = mys.check_cookie(uid, server, parsed)
+    except mys.MysError as e:
+        return CommandResult(
+            False, '已拿到 Cookie，但校验失败', [str(e), '可能是 UID 或服务器不对。'])
+
+    role = data.get('role') or {}
+    nickname = role.get('nickname') or ''
+    level = int(role.get('level') or 0)
+    db.save_account(uid, cookie, server=server, nickname=nickname, level=level)
+    db.set_setting(LOGIN_TICKET_KEY, '')
+
+    return CommandResult(
+        True, '登录成功',
+        [
+            f'UID {uid}  {nickname}  Lv{level}',
+            '',
+            '现在可以查全部角色和战绩了：',
+            '  查询 / 练度 / 混沌',
+        ],
+    )
+
+
 # ------------------------------------------------------------------ 分发
 
 CHAR_SUFFIX = re.compile(r'^(.+?)(面板|遗器|遗物|评分)$')
@@ -542,6 +678,10 @@ def dispatch(command: str) -> CommandResult:
 
     if low in ('帮助', 'help', '?', '？'):
         return CommandResult(True, '', HELP_TEXT.splitlines())
+    if low in ('登录', '扫码登录', '扫码', 'login'):
+        return cmd_login()
+    if low in ('登录状态', '确认登录', '扫码状态', 'login-status'):
+        return cmd_login_check()
     if low in ('查询', '面板', '概览', '账号', 'info'):
         return cmd_overview()
     if low in ('练度', '排行', '遗器排行', 'rank'):

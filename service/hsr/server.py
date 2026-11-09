@@ -166,8 +166,13 @@ class Handler(BaseHTTPRequestHandler):
             db.log_command(db.get_default_uid(), command, result.ok, elapsed)
 
             segments: list[dict[str, Any]] = []
+            # 命令自己产出的图片段（如扫码登录的二维码）优先
+            preset = result.data.get('segments') if isinstance(result.data, dict) else None
+            if preset:
+                segments.extend(preset)
+
             render_error = ''
-            if want_image and result.ok and result.blocks:
+            if want_image and result.ok and result.blocks and not preset:
                 try:
                     png = result.render_png()
                     if png:
