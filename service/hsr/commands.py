@@ -59,10 +59,27 @@ class CommandResult:
     lines: list[str] = field(default_factory=list)
     # 结构化数据（出图 / 前端用）
     data: dict[str, Any] = field(default_factory=dict)
+    # 出图用：卡片标题 / 副标题 / 区块
+    card_title: str = ''
+    card_subtitle: str = ''
+    blocks: list[Any] = field(default_factory=list)
 
     @property
     def text(self) -> str:
         return '\n'.join([self.title] + self.lines if self.title else self.lines)
+
+    def render_png(self) -> str | None:
+        """渲染成 PNG；Pillow 不可用或没有区块时返回 None。"""
+        if not self.blocks:
+            return None
+        from .render import card as card_render
+
+        return card_render.render_card(
+            title=self.card_title or self.title or '星穹铁道',
+            subtitle=self.card_subtitle,
+            blocks=self.blocks,
+            footer='dsh-plugin-hsr · 词条权重来自 miao-plugin',
+        )
 
 
 def _fmt_panel(panel: dict[str, float]) -> list[str]:
@@ -189,6 +206,8 @@ def _player_from_dict(d: dict[str, Any]) -> mihomo.Player:
 # ------------------------------------------------------------------ 具体命令
 
 def cmd_overview(uid: str | None = None) -> CommandResult:
+    from .render.card import Block, grade_color
+
     p = _get_player(uid)
     st = p.stats
     lines = [
@@ -207,7 +226,13 @@ def cmd_overview(uid: str | None = None) -> CommandResult:
     lines.append(f'本页可见角色 {len(p.characters)} 人'
                  + ('（mihomo 只返回展柜角色，绑定 Cookie 可查全部）' if len(p.characters) < 20 else ''))
 
-    # 各角色遗器均分
+    blocks = [Block(heading='账号', rows=[
+        ('等级', f'{p.level}  世界 {p.world_level}', None),
+        ('角色 / 光锥 / 遗器',
+         f'{st.get("avatar_count", "?")} / {st.get("light_cone_count", "?")} / {st.get("relic_count", "?")}', None),
+        ('成就', str(st.get('achievement_count', '?')), None),
+    ])]
+
     if p.characters:
         lines.append('')
         lines.append('遗器评分：')
@@ -220,11 +245,25 @@ def cmd_overview(uid: str | None = None) -> CommandResult:
         rows.sort(key=lambda x: -x[1])
         for name, avg, grade in rows:
             lines.append(f'  {name:<8s} {avg:5.1f}  {grade}')
+        blocks.append(Block(heading='遗器评分', rows=[
+            (name, f'{avg:.1f}  {grade}', grade_color(grade))
+            for name, avg, grade in rows
+        ]))
 
-    return CommandResult(ok=True, title='星穹铁道 · 账号概览', lines=lines)
+    if len(p.characters) < 20:
+        blocks.append(Block(text='当前数据来自 mihomo 公开接口，只有游戏展柜里的角色。'
+                                 '绑定米游社 Cookie 后可查询账号下全部角色。'))
+
+    return CommandResult(
+        ok=True, title='星穹铁道 · 账号概览', lines=lines, blocks=blocks,
+        card_title='星穹铁道 · 账号概览',
+        card_subtitle=f'{p.nickname}  UID {p.uid}',
+    )
 
 
 def cmd_rank(uid: str | None = None) -> CommandResult:
+    from .render.card import Block, grade_color
+
     p = _get_player(uid)
     rows = []
     for c in p.characters:
@@ -233,17 +272,29 @@ def cmd_rank(uid: str | None = None) -> CommandResult:
     rows.sort(key=lambda r: -(r[4].average if r[4] else -1))
 
     lines = [f'共 {len(rows)} 名可见角色（按遗器均分排序）', '']
+    card_rows = []
     for name, elem, lvl, rank, rep in rows:
         if rep:
             lines.append(f'{name:<8s} Lv{lvl} {elem} 星魂{rank}  '
                          f'{rep.average:5.1f} {rep.grade:<4s} '
                          f'({len(rep.pieces)}/6 件)')
+            card_rows.append((f'{name}  Lv{lvl} {elem}',
+                              f'{rep.average:.1f}  {rep.grade}',
+                              grade_color(rep.grade)))
         else:
             lines.append(f'{name:<8s} Lv{lvl} {elem} 星魂{rank}  无遗器')
-    return CommandResult(ok=True, title='星穹铁道 · 练度排行', lines=lines)
+
+    blocks = [Block(heading='遗器评分排行', rows=card_rows)]
+    return CommandResult(
+        ok=True, title='星穹铁道 · 练度排行', lines=lines, blocks=blocks,
+        card_title='星穹铁道 · 练度排行',
+        card_subtitle=f'{p.nickname}  UID {p.uid}  ·  {len(rows)} 名可见角色',
+    )
 
 
 def cmd_panel(uid: str | None, char_name: str) -> CommandResult:
+    from .render.card import Block, TEXT_WARN, grade_color
+
     p = _get_player(uid)
     c = _resolve_char(p, char_name)
     if not c:
@@ -260,26 +311,61 @@ def cmd_panel(uid: str | None, char_name: str) -> CommandResult:
     if c.set_counts:
         sets = '  '.join(f'{k}×{v}' for k, v in c.set_counts.items())
         lines.append(f'套装 {sets}')
+
+    blocks = [Block(heading='基础', rows=[
+        ('等级 / 星魂', f'Lv{c.level}  {c.rank} 星魂', None),
+        ('命途 / 属性', f'{c.path} / {c.element}', None),
+        ('光锥', (f'{c.light_cone["name"]}  R{c.light_cone["rank"]}'
+                  if c.light_cone else '无'), None),
+        ('套装', '  '.join(f'{k}×{v}' for k, v in c.set_counts.items()) or '无', None),
+    ])]
+
     lines.append('')
     panel = _fmt_panel(c.panel)
     if panel:
         lines.append('面板（含养成加成）：')
-        # 每行 3 个
         for i in range(0, len(panel), 3):
             lines.append('  ' + '   '.join(panel[i:i + 3]))
+        blocks.append(Block(heading='面板', rows=[
+            (lbl, val, None) for lbl, val in (item.split(' ', 1) for item in panel)
+        ]))
+
     if c.skills:
         lines.append('')
         lines.append('技能：')
         sk = '  '.join(f'{s["type"]}{s["level"]}' for s in c.skills if s['level'] > 0)
         lines.append('  ' + sk)
+
     if c.artifacts:
         rep = score_set(c.name, c.artifacts, c.base_attr)
         lines.append('')
         lines.append(f'遗器 {rep.average:.1f} 分 / {rep.grade}（模板 {rep.title}）')
-    return CommandResult(ok=True, title='', lines=lines)
+        blocks.append(Block(
+            heading='遗器',
+            badge=f'{rep.average:.1f}  {rep.grade}',
+            badge_color=grade_color(rep.grade),
+        ))
+        for pc in rep.pieces:
+            blocks.append(Block(
+                heading=f'{pc.pos_name} {pc.name}',
+                badge=f'{pc.score:.1f}  {pc.grade}',
+                badge_color=grade_color(pc.grade),
+                rows=[(r['title'],
+                       f'{r["value"]:.1f}{"%" if r["percent"] else ""}',
+                       TEXT_WARN if r['useless'] else None)
+                      for r in pc.sub_rows],
+            ))
+
+    return CommandResult(
+        ok=True, title='', lines=lines, blocks=blocks,
+        card_title=f'{c.name}  {c.element}/{c.path}',
+        card_subtitle=f'Lv{c.level}  {c.rank} 星魂  UID {p.uid}',
+    )
 
 
 def cmd_artifacts(uid: str | None, char_name: str) -> CommandResult:
+    from .render.card import Block, TEXT_WARN, grade_color
+
     p = _get_player(uid)
     c = _resolve_char(p, char_name)
     if not c:
@@ -296,12 +382,27 @@ def cmd_artifacts(uid: str | None, char_name: str) -> CommandResult:
     ]
 
     w = {k: v for k, v in rep.weight.items() if v}
-    lines.append('词条权重：' + '  '.join(f'{k}{v}' for k, v in w.items()))
+    weight_text = '  '.join(f'{k}{v}' for k, v in w.items())
+    lines.append('词条权重：' + weight_text)
     lines.append('')
+
+    blocks = [Block(
+        heading='总览',
+        badge=f'{rep.average:.1f}  {rep.grade}',
+        badge_color=grade_color(rep.grade),
+        rows=[
+            ('总分', f'{rep.total:.1f}', None),
+            ('均分（按 6 件折算）', f'{rep.average:.1f}', None),
+            ('已装备', f'{len(rep.pieces)} / 6 件', None),
+        ],
+        text='词条权重：' + weight_text,
+    )]
 
     for pc in rep.pieces:
         lines.append(f'【{pc.pos_name}】{pc.name}  {pc.score:.1f} 分 / {pc.grade}')
         lines.append(f'    主词条 {pc.main_title} {pc.main_value:.1f}（权重 {pc.main_weight}）')
+        rows = [('主词条', f'{pc.main_title} {pc.main_value:.1f}',
+                 TEXT_WARN if pc.main_weight == 0 and pc.pos > 2 else None)]
         if pc.sub_rows:
             for r in pc.sub_rows:
                 unit = '%' if r['percent'] else ''
@@ -311,16 +412,30 @@ def cmd_artifacts(uid: str | None, char_name: str) -> CommandResult:
                 elif r['weight'] < 75:
                     tag = '  · 权重偏低'
                 lines.append(f'    {r["title"]} {r["value"]:.1f}{unit}  权重{r["weight"]}{tag}')
+                rows.append((f'{r["title"]}  (权重{r["weight"]})',
+                             f'{r["value"]:.1f}{unit}',
+                             TEXT_WARN if r['useless'] else None))
         else:
             lines.append('    (无副词条)')
         lines.append('')
+        blocks.append(Block(
+            heading=f'{pc.pos_name} {pc.name}',
+            badge=f'{pc.score:.1f}  {pc.grade}',
+            badge_color=grade_color(pc.grade),
+            rows=rows,
+        ))
 
     hints = improvement_hint(rep)
     if hints:
         lines.append('提升建议：')
         lines.extend('  ' + h for h in hints)
+        blocks.append(Block(heading='提升建议', text='\n'.join(hints)))
 
-    return CommandResult(ok=True, title='', lines=lines)
+    return CommandResult(
+        ok=True, title='', lines=lines, blocks=blocks,
+        card_title=f'{c.name} · 遗器评分',
+        card_subtitle=f'{rep.total:.1f} 分 / 均分 {rep.average:.1f} → {rep.grade}  ·  {rep.title}',
+    )
 
 
 # ------------------------------------------------------------------ 分发

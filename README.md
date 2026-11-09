@@ -19,6 +19,18 @@ sr 昔涟遗器     遗器逐件评分 + 提升建议
 
 在对话里直接说人话也行：「查一下我星铁的练度」「昔涟的遗器怎么样」。
 
+### 出图
+
+查询结果会同时渲染一张卡片显示在界面上（深色主题 + 评分配色）。
+不想要图就传 `with_image: false`。
+
+出图用 **Pillow**（本机渲染，无浏览器）：
+
+- 有 Pillow 与中文字体 → 出 PNG
+- 缺任何一个 → 自动退回纯文字，功能不受影响
+
+相比 Playwright，不用下载 Chromium（省 150MB+），冷启动更快，也没有浏览器版本漂移问题。
+
 ### 评分会告诉你
 
 - 每件遗器得分与评级（D / C / B / A / S / SS / SSS / ACE / MAX）
@@ -90,6 +102,15 @@ dsh plugin --profile <profile> add file:<clone 目录>
 - **Node.js 22+**（DSH 本身的要求）
 
 服务端只用 Python 标准库，**不需要 pip 装任何东西**。
+
+出图是可选增强：装了 **Pillow** 就出卡片，没装只出文字。
+
+```bash
+pip install Pillow   # 可选，想要图卡再装
+```
+
+中文字体需要系统自带（Windows 的微软雅黑、macOS 的 PingFang、
+Linux 的 Noto Sans CJK 都会自动识别）。
 
 ---
 

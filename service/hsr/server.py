@@ -35,11 +35,22 @@ from hsr.store import db  # noqa: E402
 
 VERSION = '0.1.0'
 
+MEDIA_DIR = os.path.join(db.DATA_DIR, 'media')
+
 
 def _json_default(o: Any) -> Any:
     if isinstance(o, set):
         return list(o)
     return str(o)
+
+
+def _media_path(name: str) -> str | None:
+    """把 /api/media/<name> 安全地解析成文件路径。"""
+    name = os.path.basename(name)
+    if not name or not name.lower().endswith(('.png', '.jpg', '.webp', '.html')):
+        return None
+    path = os.path.join(MEDIA_DIR, name)
+    return path if os.path.isfile(path) else None
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -63,6 +74,26 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_file(self, path: str) -> None:
+        """直接吐一个文件（图片）。"""
+        ext = os.path.splitext(path)[1].lower()
+        ctype = {
+            '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp',
+            '.html': 'text/html; charset=utf-8',
+        }.get(ext, 'application/octet-stream')
+        try:
+            with open(path, 'rb') as f:
+                data = f.read()
+        except OSError:
+            self._send(404, {'ok': False, 'summary': '文件读取失败'})
+            return
+        self.send_response(200)
+        self.send_header('Content-Type', ctype)
+        self.send_header('Content-Length', str(len(data)))
+        self.send_header('Cache-Control', 'public, max-age=86400')
+        self.end_headers()
+        self.wfile.write(data)
+
     def _read_json(self) -> dict[str, Any]:
         try:
             length = int(self.headers.get('Content-Length') or 0)
@@ -81,10 +112,19 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         path = self.path.split('?')[0]
         if path == '/api/health':
+            from .render import card as card_render
+
             self._send(200, {
                 'ok': True, 'service': 'dsh-plugin-hsr', 'version': VERSION,
                 'default_uid': db.get_default_uid(),
+                'render': card_render.available(),
             })
+        elif path.startswith('/api/media/'):
+            target = _media_path(path[len('/api/media/'):])
+            if target:
+                self._send_file(target)
+            else:
+                self._send(404, {'ok': False, 'summary': '图片不存在或已过期'})
         elif path == '/api/accounts':
             self._send(200, {
                 'ok': True,
@@ -115,6 +155,7 @@ class Handler(BaseHTTPRequestHandler):
         command = str(body.get('command') or '').strip()
         uid = body.get('uid')
         uid = str(uid) if uid else None
+        want_image = body.get('render') is not False
 
         started = time.time()
         try:
@@ -124,13 +165,31 @@ class Handler(BaseHTTPRequestHandler):
             elapsed = int((time.time() - started) * 1000)
             db.log_command(db.get_default_uid(), command, result.ok, elapsed)
 
+            segments: list[dict[str, Any]] = []
+            render_error = ''
+            if want_image and result.ok and result.blocks:
+                try:
+                    png = result.render_png()
+                    if png:
+                        segments.append({
+                            'type': 'image',
+                            'url': f'/api/media/{os.path.basename(png)}',
+                            'alt': result.card_title or command,
+                        })
+                except Exception as e:  # 出图失败不影响文字结果
+                    render_error = f'{type(e).__name__}: {e}'
+                    traceback.print_exc()
+
             summary = result.text
+            if render_error:
+                summary += f'\n(出图失败，已返回文字: {render_error})'
+
             self._send(200, {
                 'ok': result.ok,
                 'title': result.title,
                 'summary': summary,
                 'lines': result.lines,
-                'segments': [],
+                'segments': segments,
                 'elapsed': elapsed,
             })
         except Exception as e:  # noqa: BLE001
