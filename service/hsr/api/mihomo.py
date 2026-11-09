@@ -45,6 +45,10 @@ class Character:
     skills: list[dict] = field(default_factory=list)
     # 汇总面板（来自 additions）
     panel: dict[str, float] = field(default_factory=dict)
+    # 立绘与图标（相对 StarRailRes 的路径）
+    portrait: str = ''
+    preview: str = ''
+    icon: str = ''
 
 
 @dataclass
@@ -120,6 +124,7 @@ def _parse_artifact(raw: dict, pos: int, char_element: str) -> Artifact:
         main_value=_to_number(main),
         main_name=main.get('name') or '',
         subs=subs,
+        icon=raw.get('icon') or '',
     )
 
 
@@ -227,6 +232,9 @@ def _parse_character(raw: dict) -> Character:
         set_counts=set_counts,
         skills=skills,
         panel=panel,
+        portrait=raw.get('portrait') or '',
+        preview=raw.get('preview') or '',
+        icon=raw.get('icon') or '',
     )
 
 

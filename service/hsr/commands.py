@@ -67,6 +67,8 @@ class CommandResult:
     card_title: str = ''
     card_subtitle: str = ''
     blocks: list[Any] = field(default_factory=list)
+    # 特殊版式的出图钩子（返回 PNG 路径）；为 None 时走通用区块渲染
+    custom_renderer: Any = None
 
     @property
     def text(self) -> str:
@@ -78,6 +80,14 @@ class CommandResult:
         优先用 Playwright + HTML（排版更接近游戏 UI），
         不可用时退回 Pillow 直接绘制，再不行返回 None。
         """
+        if self.custom_renderer is not None:
+            try:
+                png = self.custom_renderer()
+                if png:
+                    return png
+            except Exception:
+                pass
+
         if not self.blocks:
             return None
 
@@ -179,12 +189,13 @@ def _player_to_dict(p: mihomo.Player) -> dict[str, Any]:
                 'base_attr': c.base_attr, 'panel': c.panel,
                 'light_cone': c.light_cone, 'set_counts': c.set_counts,
                 'skills': c.skills,
+                'portrait': c.portrait, 'preview': c.preview, 'icon': c.icon,
                 'artifacts': [
                     {
                         'pos': a.pos, 'name': a.name, 'set_name': a.set_name,
                         'level': a.level, 'rarity': a.rarity,
                         'main_key': a.main_key, 'main_value': a.main_value,
-                        'main_name': a.main_name,
+                        'main_name': a.main_name, 'icon': a.icon,
                         'subs': [
                             {'key': s.key, 'value': s.value, 'count': s.count, 'name': s.name}
                             for s in a.subs
@@ -221,6 +232,8 @@ def _player_from_dict(d: dict[str, Any]) -> mihomo.Player:
             base_attr=c.get('base_attr') or {}, light_cone=c.get('light_cone'),
             artifacts=arts, set_counts=c.get('set_counts') or {},
             skills=c.get('skills') or [], panel=c.get('panel') or {},
+            portrait=c.get('portrait', ''), preview=c.get('preview', ''),
+            icon=c.get('icon', ''),
         ))
     return mihomo.Player(
         uid=d['uid'], nickname=d.get('nickname', ''), level=d.get('level', 0),
@@ -458,10 +471,17 @@ def cmd_artifacts(uid: str | None, char_name: str) -> CommandResult:
         lines.extend('  ' + h for h in hints)
         blocks.append(Block(heading='提升建议', text='\n'.join(hints)))
 
+    # 评分卡用 miao 版式（立绘背景 + 逐件卡片），比通用区块更贴近上游
+    def _render_miao_style() -> str | None:
+        from .render import artiscard
+
+        return artiscard.render_artifact_card(c, rep, p.uid)
+
     return CommandResult(
         ok=True, title='', lines=lines, blocks=blocks,
         card_title=f'{c.name} · 遗器评分',
         card_subtitle=f'{rep.total:.1f} 分 / 均分 {rep.average:.1f} → {rep.grade}  ·  {rep.title}',
+        custom_renderer=_render_miao_style,
     )
 
 

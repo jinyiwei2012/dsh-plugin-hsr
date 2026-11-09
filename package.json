@@ -32,7 +32,7 @@
     "artifact"
   ],
   "scripts": {
-    "test": "python tests/test_artifact.py && python tests/test_render.py && python tests/test_htmlcard.py && python tests/test_mihomo.py && python tests/test_qrlogin.py && node --test tests/proxy.test.js",
+    "test": "python tests/test_artifact.py && python tests/test_render.py && python tests/test_artiscard.py && python tests/test_htmlcard.py && python tests/test_mihomo.py && python tests/test_qrlogin.py && node --test tests/proxy.test.js",
     "serve": "python service/hsr/server.py",
     "bind": "python service/tools/bind_cookie.py",
     "qrlogin": "python service/tools/qr_login.py",

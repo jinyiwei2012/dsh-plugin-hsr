@@ -75,6 +75,8 @@ class Artifact:
     main_value: float = 0.0
     main_name: str = ''
     subs: list[SubAffix] = field(default_factory=list)
+    # 图标（相对资源库路径）
+    icon: str = ''
 
 
 @dataclass
@@ -212,6 +214,9 @@ class ArtifactScore:
     main_value: float
     main_weight: int
     sub_rows: list[dict]
+    icon: str = ''
+    level: int = 0
+    main_mark_display: float = 0.0
 
 
 @dataclass
@@ -244,7 +249,10 @@ def score_set(
         sub_rows = []
         for sub in arti.subs:
             meta = ATTR_MAP.get(sub.key) or {}
-            weight = (cfg.attrs.get(sub.key) or {}).get('weight', 0)
+            ent = cfg.attrs.get(sub.key) or {}
+            weight = ent.get('weight', 0)
+            # 与 miao 展示口径一致：46.6 / 6 / 100 * (mark * 数值)
+            contrib = ent.get('mark', 0) * sub.value
             sub_rows.append({
                 'key': sub.key,
                 'title': meta.get('title') or sub.name or sub.key,
@@ -253,8 +261,15 @@ def score_set(
                 'weight': weight,
                 'count': sub.count,
                 'useless': weight == 0,
+                'mark_display': 46.6 / 6 / 100 * contrib,
             })
         sub_rows.sort(key=lambda r: -r['weight'])
+        # 主词条的展示分（与 miao 一致：主词条按 1/4 折算）
+        main_mark = 0.0
+        if arti.pos >= 3:
+            ent = cfg.attrs.get(arti.main_key) or {}
+            main_mark = 46.6 / 6 / 100 * ent.get('mark', 0) * arti.main_value / 4
+
         pieces.append(ArtifactScore(
             pos=arti.pos,
             pos_name=POS_NAMES.get(arti.pos, str(arti.pos)),
@@ -267,6 +282,9 @@ def score_set(
             main_value=arti.main_value,
             main_weight=(cfg.attrs.get(arti.main_key) or {}).get('weight', 0),
             sub_rows=sub_rows,
+            icon=arti.icon,
+            level=arti.level,
+            main_mark_display=main_mark,
         ))
 
     pieces.sort(key=lambda p: p.pos)
