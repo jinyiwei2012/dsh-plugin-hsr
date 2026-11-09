@@ -32,7 +32,7 @@
     "artifact"
   ],
   "scripts": {
-    "test": "python tests/test_artifact.py && python tests/test_render.py",
+    "test": "python tests/test_artifact.py && python tests/test_render.py && node --test tests/proxy.test.js",
     "serve": "python service/hsr/server.py",
     "bind": "python service/tools/bind_cookie.py",
     "query": "python service/tools/query.py"
