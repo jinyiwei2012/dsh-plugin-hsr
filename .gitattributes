@@ -1,0 +1,14 @@
+# 统一换行符，避免 Windows 下拉出一堆 CRLF 噪音
+* text=auto eol=lf
+
+# 生成的数据文件视为文本
+*.py   text eol=lf
+*.js   text eol=lf
+*.json text eol=lf
+*.md   text eol=lf
+*.yml  text eol=lf
+
+# 二进制
+*.png  binary
+*.jpg  binary
+*.webp binary

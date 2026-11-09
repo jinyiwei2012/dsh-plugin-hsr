@@ -1,0 +1,39 @@
+# --- Node ---
+node_modules/
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# --- 运行时数据（账号隐私，绝不入库）---
+service/data/
+!service/data/.gitkeep
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+cookies*.json
+**/cookies/
+
+# --- 构建产物 ---
+dist/
+build/
+*.tgz
+
+# --- 编辑器 / 系统 ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log
+
+# --- 本地临时 ---
+tmp/
+.cache/
