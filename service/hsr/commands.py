@@ -187,6 +187,7 @@ def _player_to_dict(p: mihomo.Player) -> dict[str, Any]:
                 'id': c.id, 'name': c.name, 'rarity': c.rarity, 'rank': c.rank,
                 'level': c.level, 'path': c.path, 'element': c.element,
                 'base_attr': c.base_attr, 'panel': c.panel,
+                'panel_base': c.panel_base, 'panel_add': c.panel_add,
                 'light_cone': c.light_cone, 'set_counts': c.set_counts,
                 'skills': c.skills,
                 'portrait': c.portrait, 'preview': c.preview, 'icon': c.icon,
@@ -232,6 +233,7 @@ def _player_from_dict(d: dict[str, Any]) -> mihomo.Player:
             base_attr=c.get('base_attr') or {}, light_cone=c.get('light_cone'),
             artifacts=arts, set_counts=c.get('set_counts') or {},
             skills=c.get('skills') or [], panel=c.get('panel') or {},
+            panel_base=c.get('panel_base') or {}, panel_add=c.get('panel_add') or {},
             portrait=c.get('portrait', ''), preview=c.get('preview', ''),
             icon=c.get('icon', ''),
         ))
@@ -396,10 +398,18 @@ def cmd_panel(uid: str | None, char_name: str) -> CommandResult:
                       for r in pc.sub_rows],
             ))
 
+    def _render_panel() -> str | None:
+        from .core.artifact import make_char_cfg
+        from .render import panelcard
+
+        cfg = make_char_cfg(c.name, c.base_attr)
+        return panelcard.render_panel_card(c, cfg.weight, p.uid)
+
     return CommandResult(
         ok=True, title='', lines=lines, blocks=blocks,
         card_title=f'{c.name}  {c.element}/{c.path}',
         card_subtitle=f'Lv{c.level}  {c.rank} 星魂  UID {p.uid}',
+        custom_renderer=_render_panel,
     )
 
 

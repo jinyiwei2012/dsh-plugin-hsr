@@ -45,6 +45,9 @@ class Character:
     skills: list[dict] = field(default_factory=list)
     # 汇总面板（来自 additions）
     panel: dict[str, float] = field(default_factory=dict)
+    # 面板拆成「基础 / 加成」两段，供面板卡显示
+    panel_base: dict[str, float] = field(default_factory=dict)
+    panel_add: dict[str, float] = field(default_factory=dict)
     # 立绘与图标（相对 StarRailRes 的路径）
     portrait: str = ''
     preview: str = ''
@@ -163,6 +166,8 @@ def _parse_character(raw: dict) -> Character:
 
     # 面板 = 基础 + 加成（此前只取了加成，导致面板偏低）
     panel: dict[str, float] = {}
+    panel_base: dict[str, float] = {}
+    panel_add: dict[str, float] = {}
     for key, base_key, add_key in (
         ('生命值', 'hp', '基础生命值'),
         ('攻击力', 'atk', '基础攻击力'),
@@ -172,15 +177,23 @@ def _parse_character(raw: dict) -> Character:
         ('暴击伤害', 'crit_dmg', '暴击伤害'),
     ):
         if base_key in base or add_key in add:
-            panel[key] = base.get(base_key, 0.0) + add.get(add_key, 0.0)
+            b = base.get(base_key, 0.0)
+            a = add.get(add_key, 0.0)
+            panel[key] = b + a
+            panel_base[key] = b
+            panel_add[key] = a
     # 这几项没有基础值，只有加成
     for key in ('击破特攻', '效果命中', '效果抵抗', '能量恢复效率', '治疗量加成'):
         if key in add:
             panel[key] = add[key]
+            panel_base[key] = 0.0
+            panel_add[key] = add[key]
     # 属性伤害加成（名字随属性变化，原样保留）
     for key, val in add.items():
         if key.endswith('属性伤害提高') or key.endswith('属性伤害加成'):
             panel[key] = val
+            panel_base[key] = 0.0
+            panel_add[key] = val
 
     # 遗器：接口按类型给出，位置取 type（1~6）
     artifacts: list[Artifact] = []
@@ -207,6 +220,7 @@ def _parse_character(raw: dict) -> Character:
             'name': s.get('name') or '',
             'level': int(s.get('level') or 0),
             'max_level': int(s.get('max_level') or 0),
+            'icon': s.get('icon') or '',
         })
 
     lc = raw.get('light_cone') or None
@@ -216,6 +230,8 @@ def _parse_character(raw: dict) -> Character:
             'rarity': int(lc.get('rarity') or 0),
             'rank': int(lc.get('rank') or 0),
             'level': int(lc.get('level') or 0),
+            'id': str(lc.get('id') or ''),
+            'icon': lc.get('icon') or '',
         }
 
     return Character(
@@ -232,6 +248,8 @@ def _parse_character(raw: dict) -> Character:
         set_counts=set_counts,
         skills=skills,
         panel=panel,
+        panel_base=panel_base,
+        panel_add=panel_add,
         portrait=raw.get('portrait') or '',
         preview=raw.get('preview') or '',
         icon=raw.get('icon') or '',

@@ -35,6 +35,11 @@ sr 末日         末日幻影战绩（需要登录）
 
 ![遗器评分](docs/screenshot-arti.png)
 
+**角色面板**同样按上游 `profile-detail` 复刻：属性表带图标、词条权重
+（权重 ≥80 标金）、基础值与加成值分开显示，下面是技能等级与光锥。
+
+![角色面板](docs/screenshot-panel.png)
+
 其他命令用通用卡片：
 
 ![账号概览](docs/screenshot-html.png)
