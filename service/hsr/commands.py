@@ -29,9 +29,10 @@ HELP_TEXT = """星穹铁道查询 · 命令
   练度               全角色遗器评分排行
   <角色>面板         单角色面板（等级/星魂/光锥/关键属性）
   <角色>遗器         单角色遗器逐件评分与提升建议
+  混沌 / 虚构 / 末日  战绩（需要 Cookie）
   帮助               显示本说明
 
-绑定 Cookie 才能查到全部角色（否则只有游戏展柜里展示的那几个）：
+绑定 Cookie 才能查到全部角色与战绩（否则只有游戏展柜里展示的那几个）：
   python service/tools/bind_cookie.py
 """
 
@@ -438,6 +439,89 @@ def cmd_artifacts(uid: str | None, char_name: str) -> CommandResult:
     )
 
 
+# ------------------------------------------------------------------ 战绩
+
+CHALLENGE_KINDS = {
+    '混沌': '1', '混沌回忆': '1', '深渊': '1',
+    '虚构': '2', '虚构叙事': '2',
+    '末日': '3', '末日幻影': '3',
+}
+
+
+def _fmt_time(t: dict | None) -> str:
+    if not isinstance(t, dict):
+        return ''
+    for k in ('datetime', 'date', 'timestamp'):
+        if t.get(k):
+            return str(t[k])
+    return ''
+
+
+def cmd_challenge(uid: str | None, kind: str = '1') -> CommandResult:
+    """战绩查询（需要米游社 Cookie）。"""
+    from .api import mys
+
+    account = db.get_account(uid) or db.get_account(None)
+    if not account or not account.cookie:
+        return CommandResult(
+            False, '战绩查询需要米游社 Cookie',
+            [
+                'mihomo 公开接口不提供战绩数据。',
+                '绑定方法：',
+                '  python service/tools/bind_cookie.py',
+                '获取 Cookie 的步骤见 docs/cookie.md',
+            ],
+        )
+
+    parsed = mys.parse_cookie(account.cookie)
+    try:
+        data = mys.fetch_challenge(account.uid, account.server, parsed, kind)
+    except mys.MysError as e:
+        return CommandResult(False, '战绩查询失败', [str(e)])
+
+    if not data or data.get('has_data') is False:
+        return CommandResult(
+            True, '暂无本期战绩',
+            ['本期还没有记录，或者尚未通关。'],
+        )
+
+    star = data.get('star_num')
+    max_floor = data.get('max_floor')
+    battle = data.get('battle_num')
+    lines = [
+        f'本期 星数 {star}' if star is not None else '',
+        f'最高层 {max_floor}  战斗次数 {battle}' if max_floor else '',
+        f'时间 {_fmt_time(data.get("begin_time"))} ~ {_fmt_time(data.get("end_time"))}',
+        '',
+    ]
+    lines = [ln for ln in lines if ln is not None]
+
+    for floor in data.get('all_floor_detail') or []:
+        name = floor.get('name') or '层'
+        fl = floor.get('floor') or ''
+        st = floor.get('star_num')
+        lines.append(f'{name} {fl}  星 {st}')
+        for node_key in ('node_1', 'node_2', 'node_3'):
+            node = floor.get(node_key)
+            if not isinstance(node, dict):
+                continue
+            avatars = node.get('avatars') or []
+            if avatars:
+                names = '、'.join(
+                    f'{a.get("name") or a.get("id")} Lv{a.get("level")}' for a in avatars
+                )
+                lines.append(f'    {names}')
+
+    title = {
+        '1': '混沌回忆', '2': '虚构叙事', '3': '末日幻影',
+    }.get(kind, '战绩')
+    return CommandResult(
+        ok=True, title=f'星穹铁道 · {title}', lines=lines,
+        card_title=f'星穹铁道 · {title}',
+        card_subtitle=f'{account.nickname or account.uid}',
+    )
+
+
 # ------------------------------------------------------------------ 分发
 
 CHAR_SUFFIX = re.compile(r'^(.+?)(面板|遗器|遗物|评分)$')
@@ -462,6 +546,10 @@ def dispatch(command: str) -> CommandResult:
         return cmd_overview()
     if low in ('练度', '排行', '遗器排行', 'rank'):
         return cmd_rank()
+    if low in CHALLENGE_KINDS:
+        return cmd_challenge(None, CHALLENGE_KINDS[low])
+    if low in ('战绩', '深渊战绩'):
+        return cmd_challenge(None, '1')
 
     m = CHAR_SUFFIX.match(raw)
     if m:
