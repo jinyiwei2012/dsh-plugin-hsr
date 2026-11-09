@@ -2,12 +2,19 @@
 #
 # 安装：
 #   python -m pip install -r service/requirements.txt
+#   python -m playwright install chromium      # 下载浏览器（约 120MB）
+#
+# 国内网络慢的话，浏览器可走镜像或代理：
+#   set PLAYWRIGHT_DOWNLOAD_HOST=https://cdn.npmmirror.com/binaries/playwright
+#   或 set HTTPS_PROXY=http://127.0.0.1:10808
 #
 # 说明：
-#   Pillow  —— 渲染查询结果卡片、二维码 PNG
-#   qrcode  —— 生成米游社扫码登录二维码（纯 Python）
+#   playwright —— HTML 卡片渲染（主路径，排版最接近游戏 UI）
+#   Pillow     —— 备用渲染器 + 二维码 PNG
+#   qrcode     —— 米游社扫码登录二维码
 #
-# 两者都不装也能用，只是没有图和二维码，会退回纯文字。
+# 缺哪个就降一级：无 playwright → Pillow；Pillow 也没有 → 纯文字。
 
+playwright>=1.49
 Pillow>=10.0
 qrcode>=7.4

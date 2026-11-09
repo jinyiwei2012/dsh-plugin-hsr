@@ -73,16 +73,39 @@ class CommandResult:
         return '\n'.join([self.title] + self.lines if self.title else self.lines)
 
     def render_png(self) -> str | None:
-        """渲染成 PNG；Pillow 不可用或没有区块时返回 None。"""
+        """渲染成 PNG。
+
+        优先用 Playwright + HTML（排版更接近游戏 UI），
+        不可用时退回 Pillow 直接绘制，再不行返回 None。
+        """
         if not self.blocks:
             return None
+
+        title = self.card_title or self.title or '星穹铁道'
+        footer = 'dsh-plugin-hsr · 词条权重来自 miao-plugin'
+
+        try:
+            from .render import htmlcard
+
+            if htmlcard.available():
+                png = htmlcard.render_card(
+                    title=title,
+                    subtitle=self.card_subtitle,
+                    blocks=self.blocks,
+                    footer=footer,
+                )
+                if png:
+                    return png
+        except Exception:
+            pass
+
         from .render import card as card_render
 
         return card_render.render_card(
-            title=self.card_title or self.title or '星穹铁道',
+            title=title,
             subtitle=self.card_subtitle,
             blocks=self.blocks,
-            footer='dsh-plugin-hsr · 词条权重来自 miao-plugin',
+            footer=footer,
         )
 
 

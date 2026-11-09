@@ -113,11 +113,13 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split('?')[0]
         if path == '/api/health':
             from .render import card as card_render
+            from .render import htmlcard
 
             self._send(200, {
                 'ok': True, 'service': 'dsh-plugin-hsr', 'version': VERSION,
                 'default_uid': db.get_default_uid(),
-                'render': card_render.available(),
+                'render': 'playwright' if htmlcard.available() else (
+                    'pillow' if card_render.available() else 'none'),
             })
         elif path.startswith('/api/media/'):
             target = _media_path(path[len('/api/media/'):])
